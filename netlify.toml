@@ -1,0 +1,35 @@
+# Root build config.
+#
+# The project lives in this repo as a zip rather than as loose files, so the
+# build unpacks it first and then runs the real build from inside. Once the
+# source is committed properly this whole file can be replaced by the
+# netlify.toml that already sits inside the project.
+
+[build]
+  command = """
+    set -e
+    ZIP=$(ls -S *.zip 2>/dev/null | head -n1)
+    if [ -z "$ZIP" ]; then echo 'No .zip found at the repository root.'; exit 1; fi
+    echo "Unpacking $ZIP"
+    rm -rf app && mkdir -p app
+    unzip -q "$ZIP" -d app
+    if [ ! -f app/package.json ]; then
+      INNER=$(find app -maxdepth 3 -name package.json -not -path '*/node_modules/*' | head -n1)
+      if [ -z "$INNER" ]; then echo 'No package.json inside the zip.'; exit 1; fi
+      DIR=$(dirname "$INNER")
+      shopt -s dotglob && mv "$DIR"/* app/
+    fi
+    cd app
+    npm ci || npm install
+    npm run build
+  """
+  publish = "app/dist"
+  functions = "app/netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
