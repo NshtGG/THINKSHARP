@@ -1,0 +1,86 @@
+name: Build ThinkSharp APK
+
+# The project was uploaded to this repo as a single zip rather than as loose
+# files, so this workflow unpacks it first and builds from the extracted tree.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Unpack the project zip
+        run: |
+          ZIP=$(ls -S *.zip 2>/dev/null | head -n1)
+          if [ -z "$ZIP" ]; then
+            echo "::error::No .zip found at the repository root."
+            exit 1
+          fi
+          echo "Unpacking $ZIP"
+          mkdir -p app
+          unzip -q "$ZIP" -d app
+          if [ ! -f app/package.json ]; then
+            INNER=$(find app -maxdepth 3 -name package.json -not -path '*/node_modules/*' | head -n1)
+            if [ -z "$INNER" ]; then
+              echo "::error::No package.json found inside the zip."
+              find app -maxdepth 3 | head -50
+              exit 1
+            fi
+            DIR=$(dirname "$INNER")
+            echo "Flattening $DIR into app"
+            shopt -s dotglob
+            mv "$DIR"/* app/ 2>/dev/null || true
+          fi
+          echo '--- project root ---'
+          ls -la app
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci || npm install
+
+      - name: Build web bundle
+        working-directory: app
+        run: npm run build
+
+      - name: Create Android project
+        working-directory: app
+        run: npx cap add android
+
+      - name: Generate icons and splash screens
+        working-directory: app
+        run: npx capacitor-assets generate --android
+
+      - name: Sync web bundle into Android
+        working-directory: app
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: app/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ThinkSharp-debug-apk
+          path: app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
