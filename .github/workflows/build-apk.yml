@@ -1,7 +1,7 @@
 name: Build ThinkSharp APK
 
-# The project was uploaded to this repo as a single zip rather than as loose
-# files, so this workflow unpacks it first and builds from the extracted tree.
+# The project was uploaded as a single zip rather than as loose files, so this
+# workflow unpacks it first and builds from the extracted tree.
 
 on:
   workflow_dispatch:
@@ -12,6 +12,8 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
 
     steps:
       - name: Check out repository
@@ -31,15 +33,12 @@ jobs:
             INNER=$(find app -maxdepth 3 -name package.json -not -path '*/node_modules/*' | head -n1)
             if [ -z "$INNER" ]; then
               echo "::error::No package.json found inside the zip."
-              find app -maxdepth 3 | head -50
               exit 1
             fi
             DIR=$(dirname "$INNER")
-            echo "Flattening $DIR into app"
             shopt -s dotglob
             mv "$DIR"/* app/ 2>/dev/null || true
           fi
-          echo '--- project root ---'
           ls -la app
 
       - name: Set up Node
@@ -77,10 +76,21 @@ jobs:
         working-directory: app/android
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: ThinkSharp-debug-apk
           path: app/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+
+      # Also publish as a release asset. Artifact downloads require a signed-in
+      # GitHub session; a release asset has a plain public URL anyone can fetch.
+      - name: Publish the APK as a public release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/android/app/build/outputs/apk/debug/app-debug.apk ThinkSharp-debug.apk
+          gh release create "apk-${{ github.run_number }}" ThinkSharp-debug.apk \
+            --title "ThinkSharp debug APK build ${{ github.run_number }}" \
+            --notes "Sideloadable debug build. Not for Play Store upload."
