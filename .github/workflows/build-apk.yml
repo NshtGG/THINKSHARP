@@ -2,6 +2,10 @@ name: Build ThinkSharp APK
 
 # The project was uploaded as a single zip rather than as loose files, so this
 # workflow unpacks it first and builds from the extracted tree.
+#
+# THINKSHARP_PATCH.zip is an overlay: the handful of files that changed after
+# the big zip was uploaded. It is unzipped on top of the extracted tree so the
+# build reflects the current source without re-uploading 11 MB of images.
 
 on:
   workflow_dispatch:
@@ -21,7 +25,7 @@ jobs:
 
       - name: Unpack the project zip
         run: |
-          ZIP=$(ls -S *.zip 2>/dev/null | head -n1)
+          ZIP=$(ls -S *.zip 2>/dev/null | grep -v THINKSHARP_PATCH.zip | head -n1)
           if [ -z "$ZIP" ]; then
             echo "::error::No .zip found at the repository root."
             exit 1
@@ -40,6 +44,16 @@ jobs:
             mv "$DIR"/* app/ 2>/dev/null || true
           fi
           ls -la app
+
+      - name: Apply the overlay patch
+        run: |
+          if [ -f THINKSHARP_PATCH.zip ]; then
+            echo "Applying THINKSHARP_PATCH.zip"
+            unzip -qo THINKSHARP_PATCH.zip -d app
+            ls -la app/src/utils
+          else
+            echo "No overlay patch present; building the zip as-is."
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -84,8 +98,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # Also publish as a release asset. Artifact downloads require a signed-in
-      # GitHub session; a release asset has a plain public URL anyone can fetch.
       - name: Publish the APK as a public release asset
         env:
           GH_TOKEN: ${{ github.token }}
